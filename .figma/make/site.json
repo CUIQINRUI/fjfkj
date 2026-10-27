@@ -1,0 +1,10 @@
+{
+  "description": "국적·지역 및 항구별 내외국인 입국자 데이터를 시각화해 입국 현황과 여행 흐름을 쉽게 파악할 수 있도록 돕습니다.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
