@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const MAX_SAMPLES = 100
@@ -10,6 +10,12 @@ type ReadingRow = {
 }
 
 type Sample = { id?: string; value: number; timestamp: number }
+type SerialPort = {
+  readable: ReadableStream<Uint8Array> | null
+  open(options: { baudRate: number }): Promise<void>
+  close(): Promise<void>
+}
+type WebSerial = { requestPort(): Promise<SerialPort> }
 
 let supabaseClient: ReturnType<typeof createClient> | null = null
 
@@ -88,7 +94,7 @@ function SensorChart({ samples }: { samples: Sample[] }) {
         className="sensor-chart"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Supabase 최근 ${samples.length}개 센서값 그래프`}
+        aria-label={`센서 최근 ${samples.length}개 값 그래프`}
       >
         <defs>
           <linearGradient id="sensorArea" x1="0" y1="0" x2="0" y2="1">
@@ -136,11 +142,22 @@ function SensorChart({ samples }: { samples: Sample[] }) {
 }
 
 export default function App() {
-  const [samples, setSamples] = useState<Sample[]>([])
+  const [databaseSamples, setDatabaseSamples] = useState<Sample[]>([])
+  const [serialSamples, setSerialSamples] = useState<Sample[]>([])
+  const [source, setSource] = useState<'supabase' | 'serial'>('supabase')
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
   const [databaseError, setDatabaseError] = useState('')
+  const [serialStatus, setSerialStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>(
+    'disconnected',
+  )
+  const [serialError, setSerialError] = useState('')
+  const serialPortRef = useRef<SerialPort | null>(null)
+  const serialReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
+  const serialStopRef = useRef(false)
+  const samples = source === 'serial' ? serialSamples : databaseSamples
   const currentSample = samples.at(-1)
-  const isConnected = connectionStatus === 'connected'
+  const isConnected =
+    source === 'serial' ? serialStatus === 'connected' : connectionStatus === 'connected'
   const currentValue = currentSample?.value
   const average = samples.length
     ? samples.reduce((sum, sample) => sum + sample.value, 0) / samples.length
@@ -165,7 +182,7 @@ export default function App() {
         const sample = toSample(payload.new as ReadingRow)
         if (!sample || !active) return
         realtimeSamples.push(sample)
-        setSamples((previous) => mergeSamples(previous, [sample]))
+        setDatabaseSamples((previous) => mergeSamples(previous, [sample]))
         setConnectionStatus('connected')
         setDatabaseError('')
       })
@@ -204,7 +221,7 @@ export default function App() {
         .map(toSample)
         .filter((sample): sample is Sample => sample !== null)
         .reverse()
-      setSamples(mergeSamples(initialSamples, realtimeSamples))
+      setDatabaseSamples(mergeSamples(initialSamples, realtimeSamples))
     }
 
     void loadLatest().catch((error: unknown) => {
@@ -218,6 +235,111 @@ export default function App() {
       void client.removeChannel(channel)
     }
   }, [])
+
+  useEffect(
+    () => () => {
+      serialStopRef.current = true
+      const reader = serialReaderRef.current
+      if (reader) {
+        void reader.cancel().catch((error: unknown) => {
+          console.error('시리얼 읽기 정리 실패:', error)
+        })
+      }
+    },
+    [],
+  )
+
+  const handleSerialConnection = async () => {
+    if (serialStatus === 'connecting') return
+    if (serialStatus === 'connected') {
+      serialStopRef.current = true
+      setSource('supabase')
+      setSerialStatus('disconnected')
+      try {
+        await serialReaderRef.current?.cancel()
+      } catch (error) {
+        setSerialStatus('error')
+        setSerialError(`시리얼 연결 해제 실패: ${errorMessage(error)}`)
+      }
+      return
+    }
+
+    const serial = (navigator as Navigator & { serial?: WebSerial }).serial
+    if (!serial) {
+      setSerialStatus('error')
+      setSerialError('이 브라우저는 Web Serial API를 지원하지 않습니다. Chrome 또는 Edge의 HTTPS 환경을 이용해 주세요.')
+      return
+    }
+
+    serialStopRef.current = false
+    setSerialStatus('connecting')
+    setSerialError('')
+
+    let port: SerialPort | null = null
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+    let connected = false
+    let failed = false
+    try {
+      port = await serial.requestPort()
+      await port.open({ baudRate: 9600 })
+      serialPortRef.current = port
+      if (!port.readable) throw new Error('시리얼 포트에서 데이터를 읽을 수 없습니다.')
+      reader = port.readable.getReader()
+      serialReaderRef.current = reader
+      connected = true
+      setSource('serial')
+      setSerialSamples([])
+      setSerialStatus('connected')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const addLine = (line: string) => {
+        const text = line.trim()
+        if (!text) return
+        const value = Number(text)
+        if (!Number.isFinite(value)) return
+        setSerialSamples((previous) => [...previous, { value, timestamp: Date.now() }].slice(-MAX_SAMPLES))
+      }
+
+      while (!serialStopRef.current) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split(/\r?\n/)
+        buffer = lines.pop() ?? ''
+        lines.forEach(addLine)
+      }
+      if (!serialStopRef.current) addLine(buffer + decoder.decode())
+    } catch (error) {
+      if (!serialStopRef.current) {
+        failed = true
+        const wasCancelled = error instanceof DOMException && error.name === 'NotFoundError'
+        setSerialStatus(wasCancelled ? 'disconnected' : 'error')
+        setSerialError(wasCancelled ? '' : `시리얼 연결 오류: ${errorMessage(error)}`)
+      }
+    } finally {
+      reader?.releaseLock()
+      if (serialReaderRef.current === reader) serialReaderRef.current = null
+      if (serialPortRef.current === port) serialPortRef.current = null
+      if (port) {
+        try {
+          await port.close()
+        } catch (error) {
+          if (!serialStopRef.current) {
+            failed = true
+            setSerialStatus('error')
+            setSerialError(`시리얼 포트 종료 오류: ${errorMessage(error)}`)
+          }
+        }
+      }
+      if (!serialStopRef.current && connected && !failed) {
+        setSerialStatus('error')
+        setSerialError('시리얼 포트 연결이 종료되었습니다.')
+      } else if (!serialStopRef.current && !connected && !failed) {
+        setSerialStatus('disconnected')
+      }
+    }
+  }
 
   return (
     <main>
@@ -233,7 +355,13 @@ export default function App() {
         <div className="header-meta">
           <span>플렉스센서 모니터링</span>
           <span className={`live-dot${isConnected ? '' : ' offline'}`} />
-          {isConnected ? 'LIVE' : connectionStatus === 'connecting' ? 'CONNECTING' : 'OFFLINE'}
+          {serialStatus === 'connecting'
+            ? 'CONNECTING'
+            : isConnected
+              ? 'LIVE'
+              : source === 'supabase' && connectionStatus === 'connecting'
+                ? 'CONNECTING'
+                : 'OFFLINE'}
         </div>
       </header>
 
@@ -246,24 +374,51 @@ export default function App() {
             <span>모니터링.</span>
           </h1>
         </div>
-        <div className="device-status">
-          <span className={`live-dot${isConnected ? '' : ' offline'}`} />
-          <div>
-            <b>SUPABASE / READINGS</b>
-            <small>
-              {connectionStatus === 'connected'
-                ? 'Realtime 구독 중'
-                : connectionStatus === 'connecting'
-                  ? '최신 센서 데이터 연결 중'
-                  : '연결 오류'}
-            </small>
+        <div className="sensor-controls">
+          <div className="device-status">
+            <span className={`live-dot${isConnected ? '' : ' offline'}`} />
+            <div>
+              <b>{source === 'serial' || serialStatus === 'connecting' ? 'ARDUINO / SERIAL' : 'SUPABASE / READINGS'}</b>
+              <small>
+                {source === 'serial' || serialStatus === 'connecting'
+                  ? serialStatus === 'connected'
+                    ? '9600 baud · 로컬 실시간 수신'
+                    : serialStatus === 'connecting'
+                      ? '포트 연결 중'
+                      : serialStatus === 'error'
+                        ? '시리얼 연결 오류'
+                        : '시리얼 연결 대기 중'
+                  : connectionStatus === 'connected'
+                    ? 'Realtime 구독 중'
+                    : connectionStatus === 'connecting'
+                      ? '최신 센서 데이터 연결 중'
+                      : '연결 오류'}
+              </small>
+            </div>
           </div>
+          <button
+            className="serial-button"
+            type="button"
+            onClick={() => void handleSerialConnection()}
+            disabled={serialStatus === 'connecting'}
+          >
+            {serialStatus === 'connected'
+              ? '시리얼 연결 해제'
+              : serialStatus === 'connecting'
+                ? '포트 연결 중...'
+                : '시리얼 연결'}
+          </button>
         </div>
       </section>
 
-      {databaseError && (
+      {source === 'supabase' && databaseError && (
         <p className="database-error" role="alert">
           {databaseError}
+        </p>
+      )}
+      {serialError && (
+        <p className="serial-error" role="alert">
+          {serialError}
         </p>
       )}
 
@@ -271,12 +426,12 @@ export default function App() {
         <article className="current-sensor">
           <div className="sensor-card-head">
             <span>CURRENT VALUE</span>
-            <b>{isConnected ? '실시간' : 'SUPABASE'}</b>
+            <b>{source === 'serial' ? '시리얼' : isConnected ? '실시간' : 'SUPABASE'}</b>
           </div>
           <div className="sensor-reading">
             <strong>{currentValue === undefined ? '—' : formatValue(currentValue)}</strong>
           </div>
-          <p>Supabase 최신 센서값</p>
+          <p>{source === 'serial' ? '아두이노 최신 센서값 · 데이터베이스 저장 안 함' : 'Supabase 최신 센서값'}</p>
           <div className="sensor-range">
             <span>{samples.length} / {MAX_SAMPLES}개 측정값</span>
             <span>최근 순</span>
@@ -314,7 +469,10 @@ export default function App() {
           <div>
             <p className="section-no">01 / SENSOR HISTORY</p>
             <h2>시간별 센서 변화</h2>
-            <p>Supabase readings 테이블 · 최근 {MAX_SAMPLES}개 값</p>
+            <p>
+              {source === 'serial' ? '아두이노 시리얼 입력 · 로컬 최근' : 'Supabase readings 테이블 · 최근'}{' '}
+              {MAX_SAMPLES}개 값
+            </p>
           </div>
           <div className="sample-count">{samples.length} / {MAX_SAMPLES} SAMPLES</div>
         </div>
@@ -322,7 +480,11 @@ export default function App() {
         <div className="sensor-chart-footer">
           <span>
             <i />
-            {isConnected ? '실시간 Supabase 센서값' : 'Supabase 센서값'}
+            {source === 'serial'
+              ? '실시간 아두이노 시리얼 센서값 · 저장 안 함'
+              : isConnected
+                ? '실시간 Supabase 센서값'
+                : 'Supabase 센서값'}
           </span>
           <p>
             {currentSample ? `마지막 업데이트 ${formatTime(currentSample.timestamp)}` : '센서 데이터 대기 중'}
@@ -333,7 +495,7 @@ export default function App() {
       <footer>
         <span>FLEX SENSOR</span>
         <p>실시간 센서 모니터링 대시보드</p>
-        <p>SUPABASE REALTIME</p>
+        <p>{source === 'serial' ? 'WEB SERIAL · LOCAL ONLY' : 'SUPABASE REALTIME'}</p>
       </footer>
     </main>
   )

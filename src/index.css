@@ -68,11 +68,15 @@ h1 span { color:#767676; }
 footer { margin-top:70px; padding-top:24px; border-top:1px solid #252525; display:flex; justify-content:space-between; color:#4f4f4f; font:10px 'IBM Plex Mono'; }
 footer span { color:#888; font-weight:700; }
 .sensor-hero { display:flex; align-items:end; justify-content:space-between; padding:68px 0 52px; }
+.sensor-controls { display:flex; align-items:center; gap:10px; }
 .device-status { display:flex; align-items:center; gap:14px; padding:16px 19px; border:1px solid #2d2d2d; background:#101010; }
 .device-status .live-dot { margin:0; }
 .device-status div { display:flex; flex-direction:column; gap:4px; }
 .device-status b { font:500 11px 'IBM Plex Mono'; letter-spacing:.1em; }
 .device-status small { color:#626262; font-size:10px; }
+.serial-button { min-height:49px; padding:0 18px; border:1px solid #c8ff38; background:#c8ff38; color:#080808; font-size:12px; font-weight:700; white-space:nowrap; }
+.serial-button:hover:not(:disabled) { background:#dcff80; border-color:#dcff80; }
+.serial-button:disabled { cursor:wait; opacity:.65; }
 .sensor-grid { display:grid; grid-template-columns:1.45fr 1fr; gap:22px; }
 .current-sensor { min-height:330px; padding:30px; border:1px solid #303030; background:linear-gradient(135deg,#111 55%,#17200d); }
 .sensor-card-head { display:flex; align-items:center; justify-content:space-between; color:#727272; font:11px 'IBM Plex Mono'; letter-spacing:.12em; }
@@ -103,6 +107,7 @@ footer span { color:#888; font-weight:700; }
 .sensor-chart-footer b { color:#aaa; font-weight:400; }
 .live-dot.offline { background:#555; box-shadow:none; }
 .database-error { margin:0 0 18px; padding:13px 16px; border:1px solid #663a32; background:#1b100e; color:#ff9c88; font-size:12px; }
+.serial-error { margin:0 0 18px; padding:13px 16px; border:1px solid #663a32; background:#1b100e; color:#ff9c88; font-size:12px; }
 .sample-count { color:#c8ff38; border:1px solid #3c4d1c; padding:10px 12px; font:10px 'IBM Plex Mono'; white-space:nowrap; }
 @media(max-width:760px) {
   main { padding:0 18px 36px; }
@@ -116,7 +121,7 @@ footer span { color:#888; font-weight:700; }
   .bars { overflow-x:auto; gap:18px; padding-inline:22px; }.bar-item { min-width:52px; }
   .port-summary { grid-template-columns:1fr auto; gap:8px; }.port-summary p { display:none; }
   footer p:first-of-type { display:none; }
-  .sensor-hero { display:block; padding:48px 0 36px; }.device-status { margin-top:28px; }
+  .sensor-hero { display:block; padding:48px 0 36px; }.sensor-controls { align-items:stretch; flex-direction:column; margin-top:28px; }.device-status { margin:0; }.serial-button { width:100%; }
   .sensor-grid { grid-template-columns:1fr; }.current-sensor { min-height:290px; }
   .sensor-reading strong { font-size:90px; }
   .sensor-stats { min-height:280px; }
