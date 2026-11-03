@@ -1,0 +1,26 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start Figma Make app",
+            "type": "shell",
+            "command": "if curl -fsS http://127.0.0.1:5173/ > /dev/null; then printf 'Vite server already ready at http://127.0.0.1:5173/\\n'; else npm run dev -- --host 127.0.0.1 --port 5173; fi",
+            "isBackground": true,
+            "problemMatcher": {
+                "owner": "custom",
+                "pattern": {
+                    "regexp": "^$"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": ".*http://127\\.0\\.0\\.1:5173/.*"
+                }
+            },
+            "presentation": {
+                "reveal": "silent",
+                "panel": "dedicated"
+            }
+        }
+    ]
+}

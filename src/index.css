@@ -101,6 +101,9 @@ footer span { color:#888; font-weight:700; }
 .sensor-chart-footer { display:flex; justify-content:space-between; padding:17px 30px; border-top:1px solid #252525; color:#696969; font:10px 'IBM Plex Mono'; }
 .sensor-chart-footer i { display:inline-block; width:7px; height:7px; margin-right:8px; border-radius:50%; background:#c8ff38; }
 .sensor-chart-footer b { color:#aaa; font-weight:400; }
+.live-dot.offline { background:#555; box-shadow:none; }
+.database-error { margin:0 0 18px; padding:13px 16px; border:1px solid #663a32; background:#1b100e; color:#ff9c88; font-size:12px; }
+.sample-count { color:#c8ff38; border:1px solid #3c4d1c; padding:10px 12px; font:10px 'IBM Plex Mono'; white-space:nowrap; }
 @media(max-width:760px) {
   main { padding:0 18px 36px; }
   header { height:72px; }.header-meta { display:none; }.main-nav { gap:14px; }.main-nav button { font-size:10px; }
@@ -118,4 +121,5 @@ footer span { color:#888; font-weight:700; }
   .sensor-reading strong { font-size:90px; }
   .sensor-stats { min-height:280px; }
   .time-filter { margin-top:20px; width:max-content; }
+  .sample-count { display:inline-block; margin-top:20px; }
 }
